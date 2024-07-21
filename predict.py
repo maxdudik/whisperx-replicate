@@ -86,7 +86,7 @@ class Predictor(BasePredictor):
                 description="Maximum number of speakers if diarization is activated (leave blank if unknown)",
                 default=None),
             group_segments: bool = Input(
-                description="Group segments of same speaker shorter apart than 2 seconds",
+                description="Group segments of same speaker shorter apart than 2 seconds (only used if diarization is enabled)",
                 default=True),
             debug: bool = Input(
                 description="Print out compute/inference times and memory usage information",
@@ -168,9 +168,10 @@ class Predictor(BasePredictor):
 
             if diarization:
                 result = diarize(audio, result, debug, huggingface_access_token, min_speakers, max_speakers)
-
-            # Group segments after all processing is done
-            result['segments'] = self.group_segments_by_speaker(result['segments'], group_segments)
+                
+                # Group segments only if diarization is enabled
+                if group_segments:
+                    result['segments'] = self.group_segments_by_speaker(result['segments'])
 
             if debug:
                 print(f"max gpu memory allocated over runtime: {torch.cuda.max_memory_reserved() / (1024 ** 3):.2f} GB")
@@ -180,10 +181,7 @@ class Predictor(BasePredictor):
             detected_language=detected_language
         )
 
-    def group_segments_by_speaker(self, segments, group_segments=True):
-        if not group_segments:
-            return segments
-
+    def group_segments_by_speaker(self, segments):
         output = []
         current_group = None
 
@@ -311,7 +309,7 @@ def align(audio, result, debug):
 def diarize(audio, result, debug, huggingface_access_token, min_speakers, max_speakers):
     start_time = time.time_ns() / 1e6
 
-    diarize_model = whisperx.DiarizationPipeline(model_name='pyannote/speaker-diarization-3.1',
+    diarize_model = whisperx.DiarizationPipeline(model_name='pyannote/speaker-diarization@3.1',
                                                  use_auth_token=huggingface_access_token, device=device)
     diarize_segments = diarize_model(audio, min_speakers=min_speakers, max_speakers=max_speakers)
 
