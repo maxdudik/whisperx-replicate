@@ -309,7 +309,7 @@ def align(audio, result, debug):
 def diarize(audio, result, debug, huggingface_access_token, min_speakers, max_speakers):
     start_time = time.time_ns() / 1e6
 
-    diarize_model = whisperx.DiarizationPipeline(model_name='pyannote/speaker-diarization@3.1',
+    diarize_model = whisperx.DiarizationPipeline(model_name='pyannote/speaker-diarization-3.1',
                                                  use_auth_token=huggingface_access_token, device=device)
     diarize_segments = diarize_model(audio, min_speakers=min_speakers, max_speakers=max_speakers)
 
