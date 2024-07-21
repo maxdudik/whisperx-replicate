@@ -85,6 +85,9 @@ class Predictor(BasePredictor):
             max_speakers: int = Input(
                 description="Maximum number of speakers if diarization is activated (leave blank if unknown)",
                 default=None),
+            group_segments: bool = Input(
+                description="Group segments of same speaker shorter apart than 2 seconds",
+                default=True),
             debug: bool = Input(
                 description="Print out compute/inference times and memory usage information",
                 default=False)
@@ -166,6 +169,9 @@ class Predictor(BasePredictor):
             if diarization:
                 result = diarize(audio, result, debug, huggingface_access_token, min_speakers, max_speakers)
 
+            # Group segments after all processing is done
+            result['segments'] = self.group_segments_by_speaker(result['segments'], group_segments)
+
             if debug:
                 print(f"max gpu memory allocated over runtime: {torch.cuda.max_memory_reserved() / (1024 ** 3):.2f} GB")
 
@@ -173,6 +179,31 @@ class Predictor(BasePredictor):
             segments=result["segments"],
             detected_language=detected_language
         )
+
+    def group_segments_by_speaker(self, segments, group_segments=True):
+        if not group_segments:
+            return segments
+
+        output = []
+        current_group = None
+
+        for segment in segments:
+            if current_group is None:
+                current_group = segment.copy()
+            elif (segment['speaker'] == current_group['speaker'] and
+                  segment['start'] - current_group['end'] <= 2):
+                current_group['end'] = segment['end']
+                current_group['text'] += ' ' + segment['text']
+                if 'words' in current_group and 'words' in segment:
+                    current_group['words'].extend(segment['words'])
+            else:
+                output.append(current_group)
+                current_group = segment.copy()
+
+        if current_group is not None:
+            output.append(current_group)
+
+        return output
 
 
 def get_audio_duration(file_path):
