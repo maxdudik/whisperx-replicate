@@ -1,6 +1,6 @@
 from cog import BasePredictor, Input, Path, BaseModel
 from pydub import AudioSegment
-from typing import Any
+from typing import Any, List
 from whisperx.audio import N_SAMPLES, log_mel_spectrogram
 
 import gc
@@ -11,6 +11,7 @@ import whisperx
 import tempfile
 import time
 import torch
+import re
 
 compute_type = "float16"  # change to "int8" if low on GPU mem (may reduce accuracy)
 device = "cuda"
@@ -86,7 +87,7 @@ class Predictor(BasePredictor):
                 description="Maximum number of speakers if diarization is activated (leave blank if unknown)",
                 default=None),
             group_segments: bool = Input(
-                description="Group segments of same speaker shorter apart than 2 seconds (only used if diarization is enabled)",
+                description="Group segments of same speaker shorter apart than 2 seconds",
                 default=True),
             debug: bool = Input(
                 description="Print out compute/inference times and memory usage information",
@@ -168,10 +169,9 @@ class Predictor(BasePredictor):
 
             if diarization:
                 result = diarize(audio, result, debug, huggingface_access_token, min_speakers, max_speakers)
-                
-                # Group segments only if diarization is enabled
-                if group_segments:
-                    result['segments'] = self.group_segments_by_speaker(result['segments'])
+
+            if group_segments:
+                result["segments"] = group_segments_func(result["segments"], diarization)
 
             if debug:
                 print(f"max gpu memory allocated over runtime: {torch.cuda.max_memory_reserved() / (1024 ** 3):.2f} GB")
@@ -180,28 +180,6 @@ class Predictor(BasePredictor):
             segments=result["segments"],
             detected_language=detected_language
         )
-
-    def group_segments_by_speaker(self, segments):
-        output = []
-        current_group = None
-
-        for segment in segments:
-            if current_group is None:
-                current_group = segment.copy()
-            elif (segment['speaker'] == current_group['speaker'] and
-                  segment['start'] - current_group['end'] <= 2):
-                current_group['end'] = segment['end']
-                current_group['text'] += ' ' + segment['text']
-                if 'words' in current_group and 'words' in segment:
-                    current_group['words'].extend(segment['words'])
-            else:
-                output.append(current_group)
-                current_group = segment.copy()
-
-        if current_group is not None:
-            output.append(current_group)
-
-        return output
 
 
 def get_audio_duration(file_path):
@@ -324,3 +302,28 @@ def diarize(audio, result, debug, huggingface_access_token, min_speakers, max_sp
     del diarize_model
 
     return result
+
+
+def group_segments_func(segments: List[dict], diarization: bool) -> List[dict]:
+    if not segments:
+        return []
+
+    grouped_segments = []
+    current_group = segments[0].copy()
+
+    for i in range(1, len(segments)):
+        time_gap = segments[i]["start"] - segments[i-1]["end"]
+        same_speaker = (diarization and segments[i].get("speaker") == segments[i-1].get("speaker")) or (not diarization)
+
+        if same_speaker and time_gap <= 2:
+            current_group["end"] = segments[i]["end"]
+            current_group["text"] += " " + segments[i]["text"]
+            if "words" in current_group and "words" in segments[i]:
+                current_group["words"].extend(segments[i]["words"])
+        else:
+            grouped_segments.append(current_group)
+            current_group = segments[i].copy()
+
+    grouped_segments.append(current_group)
+
+    return grouped_segments
